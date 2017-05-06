@@ -1,9 +1,11 @@
 module Plugin where
 
 import API
+import Plugin.Func1
+import Plugin.Func2
 
 plugin :: API
 plugin = API {
-    func1 = \a b -> pure (a > b)
-  , func2 = \a b -> pure (a < b)
+    func1 = impl1
+  , func2 = impl2
   }

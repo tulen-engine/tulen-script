@@ -1,0 +1,15 @@
+-- This file is for testing only, plugin loader is looking for plugin.yaml file
+name:           plugin
+version:        0.1.0.0
+cabal-version:  >= 1.10
+
+library
+  hs-source-dirs: src
+  exposed-modules:
+    Plugin
+    Plugin.Func1
+    Plugin.Func2
+  build-depends: api
+  default-extensions:
+    Safe
+    NoImplicitPrelude

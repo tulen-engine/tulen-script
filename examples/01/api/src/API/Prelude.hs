@@ -6,9 +6,13 @@ module API.Prelude(
   , Double
   , Bool
   , RIO
+  , Eq(..)
+  , Ord(..)
   ) where
 
+import Prelude
 import Control.Monad
+import Control.Applicative
 
 newtype RIO a = RIO { runRIO :: IO a }
 

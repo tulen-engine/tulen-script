@@ -1,6 +1,7 @@
 name:           core
 version:        0.1.0.0
 cabal-version:  >= 1.10
+build-type:     Simple
 
 executable crafty-example01
   hs-source-dirs:      src
@@ -9,4 +10,5 @@ executable crafty-example01
   default-language:    Haskell2010
   build-depends:
       base          >= 4.7    && < 5
+    , api
     , crafty-script
