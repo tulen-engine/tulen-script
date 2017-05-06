@@ -1,0 +1,15 @@
+name:           api
+version:        0.1.0.0
+cabal-version:  >= 1.10
+
+library
+  hs-source-dirs: src
+  exposed-modules:
+    API
+    API.Prelude
+    API.Sub1
+    API.Sub2
+  build-depends: base
+  default-extensions:
+    Safe
+    NoImplicitPrelude
