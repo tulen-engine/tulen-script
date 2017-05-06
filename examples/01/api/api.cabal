@@ -6,10 +6,12 @@ library
   hs-source-dirs: src
   exposed-modules:
     API
+    API.Input
     API.Prelude
     API.Sub1
     API.Sub2
   build-depends: base
   default-extensions:
-    Safe
     NoImplicitPrelude
+    RecordWildCards
+    Safe

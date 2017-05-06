@@ -1,0 +1,11 @@
+name: plugin
+source:
+  - src
+main-module: Plugin
+modules:
+  - Plugin
+  - Plugin.Func1
+  - Plugin.Func2
+core-dependencies: # APIs that core must provide
+  - "api >= 0.1 && < 0.2"
+dependencies: [] # Other dependencies for plugin writer

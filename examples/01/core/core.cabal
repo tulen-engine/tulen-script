@@ -12,3 +12,5 @@ executable crafty-example01
       base          >= 4.7    && < 5
     , api
     , crafty-script
+  default-extensions:
+    RecordWildCards
