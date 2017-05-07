@@ -1,4 +1,4 @@
-module Game.Crafty.Script(
+module Game.Tulen.Script(
   -- * Monad
     ScriptT
   , runScriptT
@@ -29,7 +29,7 @@ import Language.Haskell.Interpreter.Unsafe (unsafeRunInterpreterWithArgs)
 import System.Directory
 import System.FilePath
 
-import Game.Crafty.Script.Package
+import Game.Tulen.Script.Package
 
 import qualified Data.Foldable as F
 import qualified Data.Sequence as S

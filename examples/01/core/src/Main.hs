@@ -1,7 +1,7 @@
 module Main where
 
 import API
-import Game.Crafty.Script
+import Game.Tulen.Script
 
 main :: IO ()
 main = do

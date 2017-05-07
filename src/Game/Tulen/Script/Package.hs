@@ -1,4 +1,4 @@
-module Game.Crafty.Script.Package(
+module Game.Tulen.Script.Package(
     PackageConfig
   , pkgName
   , pkgVersion
