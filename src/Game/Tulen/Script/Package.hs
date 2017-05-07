@@ -5,6 +5,7 @@ module Game.Tulen.Script.Package(
   , parseConstraintClause
   , encodeConstraintClause
   , VersionConstraint
+  , versionConstraint
   , constraintPackage
   , constraintClause
   , parseVersionConstraint
@@ -21,6 +22,7 @@ module Game.Tulen.Script.Package(
   ) where
 
 import Control.Applicative
+import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson
 import Data.Aeson.Types hiding (Parser, parse)
@@ -31,6 +33,8 @@ import Data.SemVer
 import Data.Text
 import Data.Yaml.Config
 import GHC.Generics
+
+import qualified Data.Attoparsec.Text as AT
 
 data ConstraintClause =
     VersionEqual Version
@@ -50,30 +54,35 @@ satisfyConstraint ver cc = case cc of
   VersionLessEqual v -> ver <= v
   VersionAnd c1 c2 -> satisfyConstraint ver c1 && satisfyConstraint ver c2
 
+parseVersion :: Parser Version
+parseVersion = do
+  t <- takeTill isSpace
+  either fail pure $ fromText t
+
 constraintClauseParser :: Parser ConstraintClause
 constraintClauseParser = andCase <|> basicCase
   where
   basicCase = do
     skipSpace
-    tag <- takeTill isSpace
+    tag <- AT.takeWhile (inClass "=><")
     skipSpace
     c1 <- case tag of
-      "==" -> VersionEqual <$> parser
-      ">"  -> VersionGreater <$> parser
-      ">=" -> VersionGreaterEqual <$> parser
-      "<"  -> VersionLess <$> parser
-      "<=" -> VersionLessEqual <$> parser
+      "==" -> VersionEqual <$> parseVersion <?> "equal"
+      ">"  -> VersionGreater <$> parseVersion <?> "greater"
+      ">=" -> VersionGreaterEqual <$> parseVersion <?> "greater equal"
+      "<"  -> VersionLess <$> parseVersion <?> "less"
+      "<=" -> VersionLessEqual <$> parseVersion <?> "less equal"
       _    -> fail $ "Unexpected " ++ unpack tag
-    skipSpace
     pure c1
   andCase = do
     c1 <- basicCase
+    skipSpace
     _ <- asciiCI "&&"
     c2 <- constraintClauseParser
     pure $ VersionAnd c1 c2
 
 parseConstraintClause :: Text -> Either String ConstraintClause
-parseConstraintClause = eitherResult . parse constraintClauseParser
+parseConstraintClause = parseOnly constraintClauseParser
 
 encodeConstraintClause :: ConstraintClause -> Text
 encodeConstraintClause cc = case cc of
@@ -89,12 +98,16 @@ data VersionConstraint = VersionConstraint {
 , constraintClause    :: !(Maybe ConstraintClause)
 } deriving (Show, Eq, Generic)
 
+versionConstraint :: Text -> Maybe ConstraintClause -> VersionConstraint
+versionConstraint = VersionConstraint
+
 parseVersionConstraint :: Text -> Either String VersionConstraint
-parseVersionConstraint = eitherResult . parse p
+parseVersionConstraint = parseOnly p
   where
     p = do
       skipSpace
       name <- takeTill isSpace
+      skipSpace
       VersionConstraint name <$> optional constraintClauseParser
 
 encodeVersionConstraint :: VersionConstraint -> Text
