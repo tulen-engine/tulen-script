@@ -1,5 +1,15 @@
 module Game.Tulen.Script.Package(
-    PackageConfig
+    Version
+  , ConstraintClause(..)
+  , satisfyConstraint
+  , parseConstraintClause
+  , encodeConstraintClause
+  , VersionConstraint
+  , constraintPackage
+  , constraintClause
+  , parseVersionConstraint
+  , encodeVersionConstraint
+  , PackageConfig
   , pkgName
   , pkgVersion
   , pkgSource
@@ -10,13 +20,92 @@ module Game.Tulen.Script.Package(
   , readPackageConfig
   ) where
 
+import Control.Applicative
 import Control.Monad.IO.Class
 import Data.Aeson
-import Data.Aeson.Types
+import Data.Aeson.Types hiding (Parser, parse)
+import Data.Attoparsec.Text
+import Data.Char
+import Data.Monoid
 import Data.SemVer
 import Data.Text
 import Data.Yaml.Config
 import GHC.Generics
+
+data ConstraintClause =
+    VersionEqual Version
+  | VersionGreater Version
+  | VersionGreaterEqual Version
+  | VersionLess Version
+  | VersionLessEqual Version
+  | VersionAnd ConstraintClause ConstraintClause
+  deriving (Show, Eq, Generic)
+
+satisfyConstraint :: Version -> ConstraintClause -> Bool
+satisfyConstraint ver cc = case cc of
+  VersionEqual v -> ver == v
+  VersionGreater v -> ver > v
+  VersionGreaterEqual v -> ver >= v
+  VersionLess v -> ver < v
+  VersionLessEqual v -> ver <= v
+  VersionAnd c1 c2 -> satisfyConstraint ver c1 && satisfyConstraint ver c2
+
+constraintClauseParser :: Parser ConstraintClause
+constraintClauseParser = andCase <|> basicCase
+  where
+  basicCase = do
+    skipSpace
+    tag <- takeTill isSpace
+    skipSpace
+    c1 <- case tag of
+      "==" -> VersionEqual <$> parser
+      ">"  -> VersionGreater <$> parser
+      ">=" -> VersionGreaterEqual <$> parser
+      "<"  -> VersionLess <$> parser
+      "<=" -> VersionLessEqual <$> parser
+      _    -> fail $ "Unexpected " ++ unpack tag
+    skipSpace
+    pure c1
+  andCase = do
+    c1 <- basicCase
+    _ <- asciiCI "&&"
+    c2 <- constraintClauseParser
+    pure $ VersionAnd c1 c2
+
+parseConstraintClause :: Text -> Either String ConstraintClause
+parseConstraintClause = eitherResult . parse constraintClauseParser
+
+encodeConstraintClause :: ConstraintClause -> Text
+encodeConstraintClause cc = case cc of
+  VersionEqual v -> "== " <> toText v
+  VersionGreater v -> "> " <> toText v
+  VersionGreaterEqual v -> ">= " <> toText v
+  VersionLess v -> "< " <> toText v
+  VersionLessEqual v -> "<= " <> toText v
+  VersionAnd c1 c2 -> encodeConstraintClause c1 <> " && " <> encodeConstraintClause c2
+
+data VersionConstraint = VersionConstraint {
+  constraintPackage   :: !Text
+, constraintClause    :: !(Maybe ConstraintClause)
+} deriving (Show, Eq, Generic)
+
+parseVersionConstraint :: Text -> Either String VersionConstraint
+parseVersionConstraint = eitherResult . parse p
+  where
+    p = do
+      skipSpace
+      name <- takeTill isSpace
+      VersionConstraint name <$> optional constraintClauseParser
+
+encodeVersionConstraint :: VersionConstraint -> Text
+encodeVersionConstraint VersionConstraint{..} = constraintPackage <> maybe "" ((" " <>) . encodeConstraintClause) constraintClause
+
+instance FromJSON VersionConstraint where
+  parseJSON (String s) = either (fail . ("Failed to parse version constraint: " ++)) pure $ parseVersionConstraint s
+  parseJSON wut = typeMismatch "VersionConstraint" wut
+
+instance ToJSON VersionConstraint where
+  toJSON = String . encodeVersionConstraint
 
 data PackageConfig = PackageConfig {
   pkgName         :: !Text
@@ -24,7 +113,7 @@ data PackageConfig = PackageConfig {
 , pkgSource       :: ![FilePath]
 , pkgMainModule   :: !(Maybe Text)
 , pkgModules      :: ![Text]
-, pkgDependencies :: ![Text] -- TODO
+, pkgDependencies :: ![VersionConstraint]
 } deriving (Show, Eq, Generic)
 
 defaultPackageConfig :: PackageConfig
@@ -37,12 +126,8 @@ defaultPackageConfig = PackageConfig {
   , pkgDependencies = []
   }
 
--- | Parse semversion from JSON
-parseVersion :: Text -> Parser Version
-parseVersion = either (fail . ("Failed to parse version: " ++)) pure . fromText
-
 instance FromJSON Version where
-  parseJSON (String s) = parseVersion s
+  parseJSON (String s) = either (fail . ("Failed to parse version: " ++)) pure . fromText $ s
   parseJSON wut = typeMismatch "Version" wut
 
 instance ToJSON Version where
