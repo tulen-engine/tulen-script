@@ -8,4 +8,4 @@ Features:
 
 * Script packages with dependencies.
 
-* Helpers for setting development envrironment.
+* Helpers for setting development environment.
