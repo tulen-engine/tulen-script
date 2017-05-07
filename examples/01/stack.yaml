@@ -38,7 +38,7 @@ resolver: lts-8.13
 packages:
 - 'api'
 - 'core'
-- 'plugin'
+#- 'plugin'
 - '../..'
 
 # Dependency packages to be pulled from upstream that are not in the resolver

@@ -1,0 +1,11 @@
+name: api
+version: 0.1.0.0
+source:
+  - src
+main-module: API
+modules:
+  - API
+  - API.Input
+  - API.Prelude
+  - API.Sub1
+  - API.Sub2
