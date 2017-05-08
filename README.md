@@ -8,4 +8,8 @@ Features:
 
 * Script packages with dependencies.
 
+TODO:
+
 * Helpers for setting development environment.
+
+* Cloning dependencies from trusted git repo. 
