@@ -1,9 +1,11 @@
 module Game.Tulen.Script.Package(
     Version
+  , encodeVersion
   , ConstraintClause(..)
   , satisfyConstraint
   , parseConstraintClause
   , encodeConstraintClause
+  , PackageName
   , VersionConstraint
   , versionConstraint
   , constraintPackage
@@ -36,6 +38,9 @@ import GHC.Generics
 
 import qualified Data.Attoparsec.Text as AT
 
+encodeVersion :: Version -> Text
+encodeVersion = toText
+
 data ConstraintClause =
     VersionEqual Version
   | VersionGreater Version
@@ -63,6 +68,11 @@ constraintClauseParser :: Parser ConstraintClause
 constraintClauseParser = andCase <|> basicCase
   where
   basicCase = do
+    c <- parseClause
+    skipSpace
+    endOfInput
+    pure c
+  parseClause = do
     skipSpace
     tag <- AT.takeWhile (inClass "=><")
     skipSpace
@@ -75,7 +85,7 @@ constraintClauseParser = andCase <|> basicCase
       _    -> fail $ "Unexpected " ++ unpack tag
     pure c1
   andCase = do
-    c1 <- basicCase
+    c1 <- parseClause
     skipSpace
     _ <- asciiCI "&&"
     c2 <- constraintClauseParser
@@ -93,22 +103,33 @@ encodeConstraintClause cc = case cc of
   VersionLessEqual v -> "<= " <> toText v
   VersionAnd c1 c2 -> encodeConstraintClause c1 <> " && " <> encodeConstraintClause c2
 
+-- | Script package unique name
+type PackageName = Text
+
 data VersionConstraint = VersionConstraint {
-  constraintPackage   :: !Text
+  constraintPackage   :: !PackageName
 , constraintClause    :: !(Maybe ConstraintClause)
 } deriving (Show, Eq, Generic)
 
-versionConstraint :: Text -> Maybe ConstraintClause -> VersionConstraint
+versionConstraint :: PackageName -> Maybe ConstraintClause -> VersionConstraint
 versionConstraint = VersionConstraint
 
 parseVersionConstraint :: Text -> Either String VersionConstraint
-parseVersionConstraint = parseOnly p
+parseVersionConstraint = parseOnly $ simpleCase <|> versionCase
   where
-    p = do
+    parseName = do
       skipSpace
       name <- takeTill isSpace
       skipSpace
-      VersionConstraint name <$> optional constraintClauseParser
+      pure name
+
+    simpleCase = do
+      name <- parseName
+      endOfInput
+      pure $ VersionConstraint name Nothing
+    versionCase = do
+      name <- parseName
+      VersionConstraint name . Just <$> constraintClauseParser
 
 encodeVersionConstraint :: VersionConstraint -> Text
 encodeVersionConstraint VersionConstraint{..} = constraintPackage <> maybe "" ((" " <>) . encodeConstraintClause) constraintClause
@@ -121,7 +142,7 @@ instance ToJSON VersionConstraint where
   toJSON = String . encodeVersionConstraint
 
 data PackageConfig = PackageConfig {
-  pkgName         :: !Text
+  pkgName         :: !PackageName
 , pkgVersion      :: !Version
 , pkgSource       :: ![FilePath]
 , pkgMainModule   :: !(Maybe Text)

@@ -5,6 +5,7 @@ module Game.Tulen.Script(
   , ScriptError(..)
   , InterpreterError(..)
   , GhcError(..)
+  , prettyScriptError
   , MonadScript(..)
   -- * API
   , Extension(..)
@@ -19,9 +20,10 @@ import Control.Monad.Extra
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict hiding (get)
 import Data.Bifunctor
+import Data.Map.Strict (Map)
 import Data.Monoid
 import Data.Sequence (Seq)
-import Data.Text (unpack)
+import Data.Text (Text, unpack, pack)
 import Data.Typeable
 import GHC.Generics
 import Language.Haskell.Interpreter
@@ -32,6 +34,7 @@ import System.FilePath
 import Game.Tulen.Script.Package
 
 import qualified Data.Foldable as F
+import qualified Data.Map.Strict as M
 import qualified Data.Sequence as S
 
 class MonadInterpreter m => MonadScript m where
@@ -41,24 +44,50 @@ class MonadInterpreter m => MonadScript m where
   addTopLevelModule :: Foldable f => f ModuleName -> m ()
   getTopLevelModules :: m [ModuleName]
 
+  addScriptPackage :: Text -> Version -> m ()
+  lookupScriptPackage :: Text -> m (Maybe Version)
+
 data ScriptError =
     ScriptInterpreterError InterpreterError
   | ScriptPathViolation FilePath String
   | ScriptInvalidModuleName ModuleName
   | ScriptModuleNotFound ModuleName [FilePath]
+  | ScriptPackageConflict PackageName Version Version
+  | ScriptMissingDependency PackageName VersionConstraint
+  | ScriptInvalidDependency PackageName VersionConstraint Version
   deriving (Generic, Show)
 
 instance Exception ScriptError
 
+prettyScriptError :: ScriptError -> Text
+prettyScriptError e = case e of
+  ScriptInterpreterError ie -> case ie of
+    UnknownError emsg -> "GHC unknown error: " <> pack emsg
+    WontCompile es -> "GHC compilation errors: " <> pack (unlines (errMsg <$> es))
+    NotAllowed emsg -> "GHC not allow: " <> pack emsg
+    GhcException emsg -> "GHC exception: " <> pack emsg
+  ScriptPathViolation p emsg -> "Path '" <> pack p <> "' is invalid. " <> pack emsg
+  ScriptInvalidModuleName name -> "Module name '" <> pack name <> "' is invalid."
+  ScriptModuleNotFound name src -> "Cannot find module '" <> pack name <> "'. Searched in:\n"
+    <> pack (unlines (("\t- " <>) <$> src))
+  ScriptPackageConflict name installedVer ver -> "Package " <> name <> "-" <> encodeVersion ver
+    <> " is already loaded with version " <> pack (show installedVer)
+  ScriptMissingDependency requesterName constr -> "Package " <> requesterName <> " require package "
+    <> encodeVersionConstraint constr
+  ScriptInvalidDependency requesterName constr installedVer -> "Package " <> requesterName <> " requires "
+    <> encodeVersionConstraint constr <> ", but installed version is " <> encodeVersion installedVer
+
 data ScriptEnv = ScriptEnv {
   envModules :: !(Seq ModuleName)
 , envTopModules :: !(Seq ModuleName)
+, envPackages :: !(Map Text Version)
 } deriving (Generic)
 
 newScriptEnv :: ScriptEnv
 newScriptEnv = ScriptEnv {
     envModules = mempty
   , envTopModules = mempty
+  , envPackages = mempty
   }
 
 newtype ScriptT (m :: * -> *) a = ScriptT { unScriptT :: StateT ScriptEnv (InterpreterT m) a }
@@ -82,16 +111,24 @@ instance (MonadIO m, MonadMask m) => MonadScript (ScriptT m) where
   getScriptModules = F.toList <$> gets envModules
   addTopLevelModule ms = modify' $ \s -> s { envTopModules = envTopModules s <> S.fromList (F.toList ms) }
   getTopLevelModules = F.toList <$> gets envTopModules
+  addScriptPackage name version = do
+    mver <- lookupScriptPackage name
+    whenJust mver $ \installedVersion -> throwM $ ScriptPackageConflict name installedVersion version
+    modify' $ \s -> s { envPackages = M.insert name version $ envPackages s }
+  lookupScriptPackage name = M.lookup name <$> gets envPackages
   {-# INLINE addScriptModules #-}
   {-# INLINE getScriptModules #-}
   {-# INLINE addTopLevelModule #-}
   {-# INLINE getTopLevelModules #-}
+  {-# INLINE addScriptPackage #-}
+  {-# INLINE lookupScriptPackage #-}
 
 runScriptT :: (MonadIO m, MonadMask m) => ScriptT m a -> m (Either ScriptError a)
-runScriptT ma = fmap (first ScriptInterpreterError) . unsafeRunInterpreterWithArgs args . flip evalStateT newScriptEnv $ do
+runScriptT ma = wrapExceptions . fmap (first ScriptInterpreterError) . unsafeRunInterpreterWithArgs args . flip evalStateT newScriptEnv $ do
   lift $ set [installedModulesInScope := False]
   unScriptT ma
   where
+    wrapExceptions ma = ma `catch` (pure . Left)
     args = ["-O2"] --["-fobject-code", "-O2"] doesn't work
     -- TODO: GhcException "Cannot add module M555953106601254686712058 to context: not interpreted"
 
@@ -105,12 +142,24 @@ loadScriptPackage :: MonadScript m
   -> m ()
 loadScriptPackage pkgConfPath = do
   pkgConf <- readPackageConfig pkgConfPath
+  mapM_ (guardPackageDep $ pkgName pkgConf) $ pkgDependencies pkgConf
   basePath <- liftIO $ takeDirectory <$> canonicalizePath pkgConfPath
   searchPaths <- traverse (prepareSourcePath basePath) $ pkgSource pkgConf
   mapM_ (guardWithin basePath) searchPaths
   let modules = unpack <$> pkgModules pkgConf
   addScriptModules =<< traverse (resolveModuleName searchPaths) modules
   whenJust (pkgMainModule pkgConf) $ \p -> addTopLevelModule [unpack p]
+  addScriptPackage (pkgName pkgConf) (pkgVersion pkgConf)
+
+-- | Check that dependency is in place and satisfy constraints
+guardPackageDep :: MonadScript m => PackageName -> VersionConstraint -> m ()
+guardPackageDep name constr = do
+  mver <- lookupScriptPackage (constraintPackage constr)
+  case mver of
+    Nothing -> throwM $ ScriptMissingDependency name constr
+    Just ver -> case constraintClause constr of
+      Nothing -> pure ()
+      Just clause -> unless (satisfyConstraint ver clause) $ throwM $ ScriptInvalidDependency name constr ver
 
 -- | Convert module name to relative path
 moduleToPath :: ModuleName -> FilePath

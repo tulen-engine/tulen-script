@@ -6,5 +6,5 @@ modules:
   - Plugin
   - Plugin.Func1
   - Plugin.Func2
-dependencies: # APIs that core must provide
-  - "api >= 0.1 && < 0.2"
+dependencies: # Note that versions are PVP
+  - "api >= 0.1.0 && < 0.2.0"

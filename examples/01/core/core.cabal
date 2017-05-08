@@ -12,5 +12,6 @@ executable tulen-example01
       base          >= 4.7    && < 5
     , api
     , tulen-script
+    , text
   default-extensions:
     RecordWildCards
